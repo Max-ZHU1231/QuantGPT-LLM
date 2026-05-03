@@ -253,3 +253,7 @@ class DailySummary(Base):
     __table_args__ = (
         Index("ix_daily_summaries_date_market", "date", "market", unique=True),
     )
+
+
+# Seed-factor pipeline tables (import registers metadata with Base)
+from .seed_models import SeedFactor  # noqa: E402, F401

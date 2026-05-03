@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import GUEST_USER_ID, decode_token, get_current_user, get_optional_user
 from ..db import get_db
+from ..deepseek_client import factor_llm_config
 from ..expression_parser import parse_expression
 from ..iteration import compute_factor_score
 from ..llm_service import (
@@ -138,7 +139,7 @@ def _run_backtest_task(task_id: str, req: AutoBacktestRequest, user_id: str):
                 pass
 
         if expression is None:
-            if not os.environ.get("DEEPSEEK_API_KEY"):
+            if not factor_llm_config().get("api_key"):
                 task["status"] = "failed"
                 task["error"] = (
                     "未配置 LLM API Key，无法解析自然语言。"
@@ -163,7 +164,7 @@ def _run_backtest_task(task_id: str, req: AutoBacktestRequest, user_id: str):
 
         paren_err = _validate_parentheses(expression)
         if paren_err:
-            if os.environ.get("DEEPSEEK_API_KEY"):
+            if factor_llm_config().get("api_key"):
                 logger.warning(f"[{task_id}] parentheses error, attempting fix: {paren_err}")
                 expression = _call_fix_expression(expression, paren_err, req.prompt)
                 task["expression"] = expression
@@ -176,7 +177,7 @@ def _run_backtest_task(task_id: str, req: AutoBacktestRequest, user_id: str):
             func_ = parse_expression(expression)
             func_(dummy)
         except Exception as e:
-            if os.environ.get("DEEPSEEK_API_KEY"):
+            if factor_llm_config().get("api_key"):
                 logger.warning(f"[{task_id}] validation failed, attempting fix: {e}")
                 try:
                     fixed = _call_fix_expression(expression, str(e), req.prompt)

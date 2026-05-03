@@ -10,14 +10,12 @@ Pipeline:
 
 import json
 import logging
-import os
 import re
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
-from openai import OpenAI
 
 from .factor_signals import FactorSignal, compute_factor_signals
 from .industry_analysis import compute_industry_signals
@@ -28,10 +26,6 @@ logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _TEMPLATES_PATH = Path(__file__).resolve().parent / "templates" / "factors.json"
-
-_DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-_DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-_DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 
 
 def _load_factor_templates() -> list:
@@ -326,9 +320,13 @@ def _build_llm_prompt(
 
 def _call_llm(prompt: str) -> str:
     """Call DeepSeek LLM for market summary."""
-    client = OpenAI(api_key=_DEEPSEEK_API_KEY, base_url=_DEEPSEEK_BASE_URL)
-    resp = client.chat.completions.create(
-        model=_DEEPSEEK_MODEL,
+    from .deepseek_client import chat_completion, factor_llm_client, factor_llm_config
+
+    cfg = factor_llm_config()
+    client = factor_llm_client()
+    resp = chat_completion(
+        client,
+        model=cfg["model"],
         messages=[
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": prompt},

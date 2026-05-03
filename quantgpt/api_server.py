@@ -203,6 +203,8 @@ from .routes.factor_library import router as factor_library_router
 from .routes.feedback import router as feedback_router
 from .routes.iteration_routes import router as iteration_router
 from .routes.paper import router as paper_router
+from .routes.minimal_edits import router as minimal_edits_router
+from .routes.seed_factors import router as seed_factors_router
 from .routes.sessions import router as sessions_router
 from .routes.strategy_backtest import router as strategy_backtest_router
 from .routes.wq_brain import router as wq_brain_router
@@ -212,6 +214,8 @@ app.include_router(auth_router)
 app.include_router(sessions_router)
 app.include_router(admin_router)
 app.include_router(factor_library_router)
+app.include_router(seed_factors_router)
+app.include_router(minimal_edits_router)
 app.include_router(composite_router)
 app.include_router(comparison_router)
 app.include_router(paper_router)

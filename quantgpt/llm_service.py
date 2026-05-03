@@ -209,16 +209,15 @@ def validate_parentheses(expr: str) -> str | None:
 
 
 def _get_client():
-    from openai import OpenAI
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
-    if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY environment variable is not set")
-    base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    return OpenAI(api_key=api_key, base_url=base_url)
+    from .deepseek_client import factor_llm_client
+
+    return factor_llm_client()
 
 
 def _get_model() -> str:
-    return os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+    from .deepseek_client import factor_llm_config
+
+    return factor_llm_config()["model"]
 
 
 def call_deepseek(prompt: str) -> str:
@@ -234,10 +233,16 @@ def call_deepseek(prompt: str) -> str:
             {"role": "user", "content": prompt},
         ],
         temperature=0.1,
-        max_tokens=256,
-        timeout=30,
+        max_tokens=int(os.environ.get("DEEPSEEK_MAX_TOKENS", "4096")),
+        timeout=int(os.environ.get("DEEPSEEK_TIMEOUT", "120")),
     )
-    return clean_expression(resp.choices[0].message.content)
+    text = resp.choices[0].message.content
+    if not (text or "").strip():
+        raise RuntimeError(
+            "DeepSeek 返回空内容（常见于 max_tokens 过小或模型仅输出推理字段）。"
+            "可提高 DEEPSEEK_MAX_TOKENS 或改用 DEEPSEEK_MODEL=deepseek-chat。"
+        )
+    return clean_expression(text)
 
 
 def call_fix_expression(expression: str, error: str, prompt: str) -> str:
@@ -264,10 +269,15 @@ def call_fix_expression(expression: str, error: str, prompt: str) -> str:
             {"role": "user", "content": user},
         ],
         temperature=0.1,
-        max_tokens=256,
-        timeout=30,
+        max_tokens=int(os.environ.get("DEEPSEEK_MAX_TOKENS", "4096")),
+        timeout=int(os.environ.get("DEEPSEEK_TIMEOUT", "120")),
     )
-    return clean_expression(resp.choices[0].message.content)
+    text = resp.choices[0].message.content
+    if not (text or "").strip():
+        raise RuntimeError(
+            "DeepSeek 返回空内容。可提高 DEEPSEEK_MAX_TOKENS 或改用 DEEPSEEK_MODEL=deepseek-chat。"
+        )
+    return clean_expression(text)
 
 
 _INTERPRET_SYSTEM = """你是一位专业的量化研究员，擅长用通俗语言解读因子表达式的经济含义并撰写研究报告。
@@ -300,8 +310,9 @@ def call_interpret_factor(
     backtest_summary: dict,
 ) -> dict:
     """Call LLM to interpret factor economic meaning."""
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
-    if not api_key:
+    from .deepseek_client import factor_llm_config
+
+    if not factor_llm_config()["api_key"]:
         return {}
 
     try:

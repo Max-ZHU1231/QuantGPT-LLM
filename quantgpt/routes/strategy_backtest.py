@@ -228,26 +228,18 @@ def _run_strategy_backtest_task(
 # ---- LLM helpers ----
 
 def _get_strategy_llm_config() -> dict:
-    """Get LLM config for strategy generation.
+    """LLM config for strategy codegen.
 
     Priority: STRATEGY_LLM_* > DEEPSEEK_*.
     Returns dict with keys: api_key, base_url, model, provider ('anthropic' or 'openai').
+    Default provider is OpenAI-compatible Chat Completions (DeepSeek official API).
     """
-    provider = os.environ.get("STRATEGY_LLM_PROVIDER", "").lower()
-    api_key = os.environ.get("STRATEGY_LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY")
-    base_url = os.environ.get("STRATEGY_LLM_BASE_URL") or os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    model = os.environ.get("STRATEGY_LLM_MODEL") or os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+    from ..deepseek_client import strategy_llm_config
 
-    # Auto-detect provider from model name
-    if not provider:
-        if "claude" in model.lower():
-            provider = "anthropic"
-        else:
-            provider = "openai"
-
-    if not api_key:
+    cfg = strategy_llm_config()
+    if not cfg["api_key"]:
         raise ValueError("STRATEGY_LLM_API_KEY 或 DEEPSEEK_API_KEY 未配置")
-    return {"api_key": api_key, "base_url": base_url, "model": model, "provider": provider}
+    return cfg
 
 
 def _call_deepseek_strategy(prompt: str, max_retries: int = 2) -> str:
@@ -263,7 +255,7 @@ def _call_deepseek_strategy(prompt: str, max_retries: int = 2) -> str:
         if cfg["provider"] == "anthropic":
             raw = _call_anthropic(cfg, STRATEGY_SYSTEM_PROMPT, prompt)
         else:
-            raw = _call_openai(cfg, STRATEGY_SYSTEM_PROMPT, prompt)
+            raw = _call_deepseek_compatible(cfg, STRATEGY_SYSTEM_PROMPT, prompt)
 
         logger.info(f"LLM response (attempt {attempt}): length={len(raw)}, first 200: {raw[:200]}")
 
@@ -280,11 +272,13 @@ def _call_deepseek_strategy(prompt: str, max_retries: int = 2) -> str:
     raise ValueError(f"LLM 未返回有效的 Python 代码（已重试{max_retries}次），原始内容前500字: {last_raw[:500]}")
 
 
-def _call_openai(cfg: dict, system_prompt: str, user_prompt: str) -> str:
-    """Call OpenAI-compatible API."""
-    from openai import OpenAI
-    client = OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
-    resp = client.chat.completions.create(
+def _call_deepseek_compatible(cfg: dict, system_prompt: str, user_prompt: str) -> str:
+    """Call DeepSeek (or any OpenAI-compatible endpoint) via Chat Completions."""
+    from ..deepseek_client import chat_completion, openai_sdk_client
+
+    client = openai_sdk_client(api_key=cfg["api_key"], base_url=cfg["base_url"])
+    resp = chat_completion(
+        client,
         model=cfg["model"],
         messages=[
             {"role": "system", "content": system_prompt},
@@ -324,7 +318,7 @@ def _call_fix_strategy(code: str, errors: list[str], original_prompt: str) -> st
         if cfg["provider"] == "anthropic":
             raw = _call_anthropic(cfg, STRATEGY_SYSTEM_PROMPT, combined_prompt)
         else:
-            raw = _call_openai(cfg, STRATEGY_SYSTEM_PROMPT, combined_prompt)
+            raw = _call_deepseek_compatible(cfg, STRATEGY_SYSTEM_PROMPT, combined_prompt)
         return extract_python_code(raw)
     except Exception as e:
         logger.warning(f"Strategy fix LLM call failed: {e}")

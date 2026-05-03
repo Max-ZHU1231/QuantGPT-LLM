@@ -289,20 +289,17 @@ def _call_llm(system_prompt: str, user_prompt: str, temperature: float = 0.9) ->
     """Call LLM and return cleaned expression string."""
     import time as _time
 
-    from openai import OpenAI
-
+    from .deepseek_client import chat_completion, factor_llm_client, factor_llm_config
     from .llm_service import clean_expression as _clean_expression
 
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
-    if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY not set")
-    base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    cfg = factor_llm_config()
+    client = factor_llm_client()
+    model = cfg["model"]
 
     for attempt in range(3):
         try:
-            resp = client.chat.completions.create(
+            resp = chat_completion(
+                client,
                 model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
