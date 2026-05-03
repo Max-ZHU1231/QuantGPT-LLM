@@ -151,21 +151,25 @@ async def wq_pipeline_simulate(
     neutralization: str = "SUBINDUSTRY",
     truncation: float = 0.08,
     account: str = "primary",
+    mock: bool = False,
 ) -> str:
-    """M1-5：WQBrainClient.simulate 仅拉指标（与 REST /api/v1/wq_simulations/run 同源逻辑，但不写数据库）。"""
-    from .wq_pipeline import wq_simulate_metrics_sync
+    """M1-5：WQBrainClient.simulate 仅拉指标（与 REST 同源；mock=true 时用假数据，不需 WQ 账号）。"""
+    from .wq_pipeline import wq_mock_simulate_enabled, wq_simulate_metrics_sync
 
+    use_mock = mock or wq_mock_simulate_enabled()
     try:
         result = await asyncio.to_thread(
-            wq_simulate_metrics_sync,
-            expression,
-            region=region,
-            universe=universe,
-            delay=delay,
-            decay=decay,
-            neutralization=neutralization,
-            truncation=truncation,
-            account=account,
+            lambda: wq_simulate_metrics_sync(
+                expression,
+                region=region,
+                universe=universe,
+                delay=delay,
+                decay=decay,
+                neutralization=neutralization,
+                truncation=truncation,
+                account=account,
+                mock=use_mock,
+            ),
         )
         return json.dumps(result, ensure_ascii=False, indent=2, default=str)
     except Exception as e:

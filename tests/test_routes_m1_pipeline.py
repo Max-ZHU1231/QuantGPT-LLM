@@ -48,6 +48,20 @@ async def test_wq_simulation_run_persists(mock_sim, client: AsyncClient, auth_he
     assert sim["alpha_id"] == "ABC123"
 
 
+async def test_wq_simulation_mock_body_persists(client: AsyncClient, auth_headers: dict):
+    r = await client.post(
+        "/api/v1/wq_simulations/run",
+        headers=auth_headers,
+        json={"expression": "rank(close)", "mock": True},
+    )
+    assert r.status_code == 201
+    sim = r.json()["simulation"]
+    assert sim["ok"] is True
+    assert (sim.get("alpha_id") or "").startswith("mock_alpha_")
+    raw = r.json().get("raw") or {}
+    assert raw.get("settings", {}).get("mock") is True
+
+
 async def test_admission_decide(client: AsyncClient, auth_headers: dict, test_user: User, engine):
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 

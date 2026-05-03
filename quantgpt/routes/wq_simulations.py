@@ -10,7 +10,12 @@ from ..audit_log import write_audit_event
 from ..auth import get_current_user
 from ..db import get_db
 from ..models import User
-from ..wq_pipeline import persist_wq_simulation, verify_edit_candidate_owned, wq_simulate_metrics_sync
+from ..wq_pipeline import (
+    persist_wq_simulation,
+    verify_edit_candidate_owned,
+    wq_mock_simulate_enabled,
+    wq_simulate_metrics_sync,
+)
 
 router = APIRouter(prefix="/api/v1/wq_simulations", tags=["wq_simulations"])
 
@@ -26,6 +31,7 @@ class RunWQSimulateRequest(BaseModel):
     neutralization: str = Field(default="SUBINDUSTRY", max_length=40)
     truncation: float = Field(default=0.08, ge=0.0, le=1.0)
     account: str = Field(default="primary", max_length=20)
+    mock: bool = Field(default=False, description="Synthetic IS/OOS metrics; persists like real simulate (no WQ account).")
 
 
 def _run_summary(row) -> dict:
@@ -59,16 +65,19 @@ async def run_wq_simulation(
         if not cand:
             raise HTTPException(status_code=404, detail="Edit candidate not found")
 
+    use_mock = payload.mock or wq_mock_simulate_enabled()
     sim = await asyncio.to_thread(
-        wq_simulate_metrics_sync,
-        payload.expression,
-        region=payload.region,
-        universe=payload.universe,
-        delay=payload.delay,
-        decay=payload.decay,
-        neutralization=payload.neutralization,
-        truncation=payload.truncation,
-        account=payload.account,
+        lambda: wq_simulate_metrics_sync(
+            payload.expression,
+            region=payload.region,
+            universe=payload.universe,
+            delay=payload.delay,
+            decay=payload.decay,
+            neutralization=payload.neutralization,
+            truncation=payload.truncation,
+            account=payload.account,
+            mock=use_mock,
+        ),
     )
 
     seed_id = payload.seed_factor_id
@@ -94,7 +103,7 @@ async def run_wq_simulation(
         event_type="simulate",
         entity_type="wq_simulation_run",
         entity_id=row.id,
-        payload={"ok": row.ok, "alpha_id": row.alpha_id},
+        payload={"ok": row.ok, "alpha_id": row.alpha_id, "mock": use_mock},
     )
 
     return {"status": "success", "simulation": _run_summary(row), "raw": sim}

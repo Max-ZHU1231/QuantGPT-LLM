@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime, timezone
 from uuid import UUID
@@ -11,6 +12,47 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .seed_models import EditCandidate, GenerationBatch, SeedFactor, WQSimulationRun
 from .wq_brain_client import get_client, is_configured
+
+
+def wq_mock_simulate_enabled() -> bool:
+    """When True (env), callers should use synthetic simulate payloads — dev only, not for production."""
+    return os.environ.get("WQ_SIMULATE_MOCK", "").lower() in ("1", "true", "yes")
+
+
+def _wq_simulate_mock_result(
+    expression: str,
+    *,
+    region: str,
+    universe: str,
+    delay: int,
+    decay: int,
+    neutralization: str,
+    truncation: float,
+) -> dict:
+    """Deterministic-shaped payload compatible with persist_wq_simulation / callers expecting simulate()."""
+    sfx = uuid.uuid4().hex[:8]
+    return {
+        "ok": True,
+        "expression": expression.strip(),
+        "alpha_id": f"mock_alpha_{sfx}",
+        "simulation_id": f"mock_sim_{sfx}",
+        "is": {
+            "sharpe": 1.35,
+            "fitness": 1.05,
+            "returns": 0.082,
+            "turnover": 0.22,
+        },
+        "oos": {"sharpe": 1.12, "fitness": 0.91},
+        "settings": {
+            "region": region,
+            "universe": universe,
+            "delay": delay,
+            "decay": decay,
+            "neutralization": neutralization,
+            "truncation": truncation,
+            "mock": True,
+        },
+    }
 
 
 def _new_wsim_id() -> str:
@@ -29,8 +71,19 @@ def wq_simulate_metrics_sync(
     truncation: float = 0.08,
     account: str = "primary",
     progress_callback=None,
+    mock: bool = False,
 ) -> dict:
     """Authenticate → simulate → close session. Mirrors WQBrainClient.simulate result dict."""
+    if mock:
+        return _wq_simulate_mock_result(
+            expression,
+            region=region,
+            universe=universe,
+            delay=delay,
+            decay=decay,
+            neutralization=neutralization,
+            truncation=truncation,
+        )
     if not is_configured(account):
         return {"ok": False, "error": f"WQ BRAIN not configured for account={account}"}
     client = get_client(account)
