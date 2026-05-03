@@ -15,42 +15,323 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .deepseek_client import chat_completion, factor_llm_client, factor_llm_config
-from .expression_parser import __doc__ as _expr_module_doc
-from .llm_service import OPERATORS_DOC
+from .expression_gate import extract_identifier_tokens
 from .managers.seed_factor_manager import SeedFactorManager
 from .seed_models import EditCandidate, GenerationBatch, SeedFactor
 
 logger = logging.getLogger(__name__)
 
-_OPERATORS_DOC = (_expr_module_doc or "").strip() or OPERATORS_DOC
-
 _MINIMAL_EDIT_RULES = """
 ================================================================================
-任务：最小改动模式（Seed Factor → 候选表达式）
+Task: Minimal Edit Mode (Seed Factor → Candidate Expressions)
 ================================================================================
-- 你必须以「锚定因子表达式」为起点，只做**最小必要**的改动（参数微调、增减一层 rank/ts_*、
-  与其它已允许字段的温和组合等），禁止完全重写为 unrelated 的新因子故事。
-- 每个候选必须是**单行**、可直接交给 QuantGPT 解析器执行的表达式。
-- 严禁 markdown、代码块、反引号、解释性前言或「根据分析」类废话。
-- 生成 **2～5** 个候选；优先多样化小幅改动而非同质化堆叠。
-- 遵守锚定因子自带的 blacklist_operators / blacklist_fields（用户消息中会列出）。
-- 输出必须是 **单个合法 JSON 对象**（不要 JSON 以外的任何字符）。
 
-JSON 格式（严格遵守键名）：
+[Core Objective]
+
+You must use the user-provided Seed Factor expression as the ONLY starting point.
+
+Your job is NOT to invent a brand-new factor.
+
+Your job is to generate locally improved variants of the original factor while preserving its original economic meaning, signal intuition, and structural identity.
+
+Think of this as:
+
+Alpha Repair
+Alpha Refinement
+Local Search around existing alpha
+
+NOT alpha reinvention.
+
+================================================================================
+I. Highest Priority Rules (Mandatory)
+================================================================================
+
+1. Preserve Core Logic
+
+Every candidate must preserve:
+
+- original alpha idea
+- signal directionality
+- economic rationale
+- main operator structure
+
+The result must still be recognizable as a natural variant of the seed factor.
+
+Forbidden:
+
+- unrelated new alpha story
+- replacing momentum with value
+- replacing mean reversion with volatility
+- changing cross-sectional logic into time-series logic entirely
+- full tree rewrite
+
+-------------------------------------------------------------------------------
+
+2. Only Minimal Edits Allowed
+
+Each candidate may contain ONLY ONE of the following edit classes:
+
+A. Operator Edit (exactly 1 place)
+
+Replace one operator with a functionally nearby operator.
+
+Examples:
+
+ts_mean(x,20) → ts_decay_linear(x,20)
+rank(x) → zscore(x)
+ts_std_dev(x,20) → ts_zscore(x,20)
+group_rank(x,g) → group_zscore(x,g)
+add(x,y) → subtract(x,y)
+divide(x,y) → multiply(x,inverse(y))
+
+B. Parameter Edit (1–2 places max)
+
+Adjust only parameters such as:
+
+window length
+lag
+rate
+std
+constant
+scale
+threshold
+
+Examples:
+
+ts_mean(x,20) → ts_mean(x,15)
+ts_rank(x,30) → ts_rank(x,45)
+winsorize(x,std=4) → winsorize(x,std=3)
+hump(x,0.01) → hump(x,0.02)
+
+No large structural edits.
+
+-------------------------------------------------------------------------------
+
+3. No New Data Fields Allowed
+
+You may ONLY use:
+
+- fields explicitly provided by the user
+- fields already appearing in the seed factor
+
+Forbidden examples:
+
+Seed uses close, volume
+→ You may NOT add open/high/low/vwap
+
+Seed uses returns
+→ You may NOT add market_cap unless already provided
+
+Zero tolerance for new fields.
+
+-------------------------------------------------------------------------------
+
+4. No Structural Rewrite
+
+Forbidden:
+
+- adding unrelated branches
+- replacing whole formula tree
+- introducing new factor combinations
+- changing most nodes simultaneously
+- adding 3+ new nested layers
+- deleting main signal and keeping only wrappers
+
+-------------------------------------------------------------------------------
+
+5. Single-Line Executable Expression
+
+Every candidate must be:
+
+- one line only
+- directly parsable by QuantGPT / WorldQuant style parser
+- syntactically valid
+
+-------------------------------------------------------------------------------
+
+6. Output Format Restriction
+
+Return ONE valid JSON object only.
+
+No markdown.
+No code block.
+No commentary.
+No explanation outside JSON.
+
+================================================================================
+II. Common WorldQuant Operators (Allowed ONLY as local edits)
+================================================================================
+
+[Arithmetic]
+
+abs
+add
+subtract
+multiply
+divide
+inverse
+log
+max
+min
+power
+signed_power
+sqrt
+reverse
+sign
+
+[Logical]
+
+and
+or
+not
+if_else
+<
+<=
+==
+>
+>=
+!=
+is_nan
+
+[Time Series]
+
+ts_delay
+ts_delta
+ts_mean
+ts_sum
+ts_std_dev
+ts_zscore
+ts_rank
+ts_scale
+ts_corr
+ts_covariance
+ts_decay_linear
+ts_arg_max
+ts_arg_min
+ts_av_diff
+ts_product
+ts_quantile
+ts_regression
+days_from_last_change
+hump
+last_diff_value
+kth_element
+ts_backfill
+
+[Cross Sectional]
+
+rank
+zscore
+normalize
+quantile
+scale
+winsorize
+
+[Transformational]
+
+bucket
+trade_when
+
+[Group]
+
+group_rank
+group_zscore
+group_neutralize
+group_scale
+group_mean
+group_backfill
+
+[Vector] (only if vector field already exists)
+
+vec_avg
+vec_sum
+
+================================================================================
+III. Preferred Minimal Edit Patterns
+================================================================================
+
+1. Smoothing / Noise Reduction
+
+ts_mean → ts_decay_linear
+x → hump(x,0.01)
+
+2. Robustness / Outlier Control
+
+rank → zscore
+x → winsorize(x,std=3)
+ts_std_dev → ts_zscore
+
+3. Window Tuning
+
+5 ↔ 7 ↔ 10
+10 ↔ 15 ↔ 20
+20 ↔ 30 ↔ 40
+60 ↔ 90
+
+4. Lower Turnover
+
+x → hump(x,0.01)
+trade_when(cond,x,exit)
+
+5. Group Neutral Improvement (only if group already exists)
+
+group_rank → group_zscore
+x → group_neutralize(x,industry)
+
+================================================================================
+IV. Forbidden Behavior
+================================================================================
+
+Do NOT:
+
+- add new fields
+- change multiple operators
+- modify more than 2 params
+- rewrite formula logic
+- produce invalid syntax
+- output markdown
+- output comments
+- output reasoning text
+
+If no legal candidate exists:
+return empty candidates array.
+
+================================================================================
+V. Optimization Goals
+================================================================================
+
+Candidates should ideally improve one or more:
+
+- Sharpe
+- IC
+- Stability
+- Turnover
+- Robustness
+- Neutralization quality
+
+BUT minimal edit constraint is always more important.
+
+================================================================================
+VI. Output Schema (DO NOT CHANGE FIELD NAMES)
+================================================================================
+
 {
   "candidates": [
     {
-      "expression": "单行因子表达式",
+      "expression": "single-line factor expression",
       "edit_summary": {
         "edit_direction": "conservative | aggressive | reinforcement",
         "edits": [
-          {"type": "param_tuning | operator_swap | composition | other", "detail": "简述改了什么"}
+          {
+            "type": "param_tuning | operator_swap | composition | other",
+            "detail": "what changed"
+          }
         ]
       },
       "expected_impact": {
-        "sharpe_delta": "例如 +0.05~0.12",
-        "ic_delta": "可选字符串",
-        "turnover_delta": "可选字符串",
+        "sharpe_delta": "+0.02~0.08",
+        "ic_delta": "+0.001~0.005",
+        "turnover_delta": "-3%~-10%",
         "confidence": "low | medium | high"
       },
       "core_logic_preserved": true,
@@ -58,12 +339,47 @@ JSON 格式（严格遵守键名）：
     }
   ]
 }
+
+================================================================================
+VII. Candidate Diversity Requirement
+================================================================================
+
+Generate 2 to 5 candidates with diversity:
+
+- 1 parameter tuning version
+- 1 operator swap version
+- 1 robustness enhancement version
+- 1 turnover reduction version (optional)
+- 1 group optimization version (if applicable)
+
+All must remain close neighbors of seed factor.
+
+================================================================================
+VIII. Final Reminder (Highest Priority)
+================================================================================
+
+You are NOT inventing a new alpha.
+
+You are doing constrained local optimization.
+
+Allowed actions:
+
+- change one operator
+OR
+- tune one/two parameters
+
+Never add fields.
+Never rewrite logic.
+Never drift away from seed meaning.
+
+Also obey blacklist_operators / blacklist_fields from the user message when present.
+
 ================================================================================
 """
 
 
 def _minimal_edit_system_prompt() -> str:
-    return _MINIMAL_EDIT_RULES + "\n\n" + _OPERATORS_DOC
+    return _MINIMAL_EDIT_RULES.strip()
 
 
 def _build_user_prompt(
@@ -74,8 +390,9 @@ def _build_user_prompt(
     kb = knowledge_base or {}
     verified = kb.get("verified_rules") or []
     failed = kb.get("failed_paths") or []
+    id_tokens = sorted(set(extract_identifier_tokens(seed.expression or "")))
     parts = [
-        "=== 锚定种子因子 ===",
+        "=== Seed Factor (anchor) ===",
         f"id: {seed.id}",
         f"name: {seed.name}",
         f"expression: {seed.expression}",
@@ -85,17 +402,20 @@ def _build_user_prompt(
         f"blacklist_operators: {seed.blacklist_operators or []}",
         f"blacklist_fields: {seed.blacklist_fields or []}",
         "",
-        "=== 改动目标（数值缺口）===",
+        "=== Identifier tokens already present in seed expression (do NOT introduce new data fields) ===",
+        json.dumps(id_tokens, ensure_ascii=False),
+        "",
+        "=== Optimization target (numeric gap) ===",
         f"metric: {target_gap.get('metric', '')}",
         f"current: {target_gap.get('current')}",
         f"target: {target_gap.get('target')}",
         f"constraint: {target_gap.get('constraint', '')}",
         "",
-        "=== 知识库（可选）===",
+        "=== Knowledge base (optional) ===",
         f"verified_rules: {json.dumps(verified, ensure_ascii=False)}",
         f"failed_paths: {json.dumps(failed, ensure_ascii=False)}",
         "",
-        "请输出 JSON（仅 JSON）。",
+        "Output JSON only (single object).",
     ]
     return "\n".join(parts)
 
@@ -124,17 +444,41 @@ def _extract_json_object(raw: str) -> dict:
     m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw, re.IGNORECASE)
     if m:
         raw = m.group(1).strip()
-    data = json.loads(raw)
-    if not isinstance(data, dict):
-        raise ValueError("LLM JSON 根节点必须是对象")
-    return data
+
+    def _loads(s: str) -> dict:
+        data = json.loads(s)
+        if not isinstance(data, dict):
+            raise ValueError("LLM JSON root must be an object")
+        return data
+
+    try:
+        return _loads(raw)
+    except json.JSONDecodeError:
+        start = raw.find("{")
+        if start < 0:
+            raise
+        depth = 0
+        for i in range(start, len(raw)):
+            ch = raw[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return _loads(raw[start : i + 1])
+        raise
 
 
 def _parse_candidates_payload(raw: str) -> list[dict]:
     data = _extract_json_object(raw)
     cands = data.get("candidates")
-    if not isinstance(cands, list) or not cands:
-        raise ValueError("JSON 缺少非空 candidates 数组")
+    if cands is None:
+        raise ValueError('JSON must contain key "candidates" (array, may be empty)')
+    if not isinstance(cands, list):
+        raise ValueError("candidates must be an array")
+    if len(cands) == 0:
+        return []
+
     out: list[dict] = []
     for item in cands[:10]:
         if not isinstance(item, dict):
@@ -145,9 +489,8 @@ def _parse_candidates_payload(raw: str) -> list[dict]:
         expr = expr.strip("`").strip()
         if not expr:
             continue
+        item = {**item, "expression": expr}
         out.append(item)
-    if not out:
-        raise ValueError("没有可用的候选表达式")
     return out
 
 
@@ -168,6 +511,11 @@ def _candidate_row(batch_id: str, seed_id: str, item: dict) -> EditCandidate:
     edits = edit_summary.get("edits") if isinstance(edit_summary.get("edits"), list) else []
     exp_imp = item.get("expected_impact") if isinstance(item.get("expected_impact"), dict) else {}
 
+    dev = item.get("deviation_explanation")
+    deviation_explanation = None
+    if dev is not None and dev != "":
+        deviation_explanation = str(dev)[:2000]
+
     return EditCandidate(
         id=_new_candidate_id(),
         batch_id=batch_id,
@@ -181,7 +529,7 @@ def _candidate_row(batch_id: str, seed_id: str, item: dict) -> EditCandidate:
         expected_turnover_delta=str(exp_imp.get("turnover_delta") or "")[:50] or None,
         impact_confidence=str(exp_imp.get("confidence") or "")[:50] or None,
         core_logic_preserved=bool(item.get("core_logic_preserved", True)),
-        deviation_explanation=(str(item["deviation_explanation"])[:2000] if item.get("deviation_explanation") else None),
+        deviation_explanation=deviation_explanation,
         created_at=datetime.now(timezone.utc),
     )
 
@@ -210,7 +558,7 @@ async def generate_minimal_edits_for_seed(
         seed_factor_id=seed.id,
         model=cfg["model"],
         temperature=0.3,
-        prompt_version="m1-3-v1",
+        prompt_version="m1-3-v2-en-minimal",
         target_metric=str(target_gap.get("metric") or "")[:50] or None,
         current_value=target_gap.get("current") if isinstance(target_gap.get("current"), (int, float)) else None,
         target_value=target_gap.get("target") if isinstance(target_gap.get("target"), (int, float)) else None,

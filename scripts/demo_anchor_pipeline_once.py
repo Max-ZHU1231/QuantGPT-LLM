@@ -31,8 +31,9 @@ if _env_file.is_file():
 async def main(*, use_mock: bool, account: str) -> None:
     os.chdir(_root)
 
-    import quantgpt.models  # noqa: F401 — 注册 Base.metadata
+    from sqlalchemy import select
 
+    import quantgpt.models  # noqa: F401 — 注册 Base.metadata
     from quantgpt.auth import _DEV_USER_ID
     from quantgpt.db import _get_session_factory, close_db, init_db
     from quantgpt.expression_gate import validate_wq_full
@@ -41,8 +42,6 @@ async def main(*, use_mock: bool, account: str) -> None:
     from quantgpt.seed_models import SeedFactor
     from quantgpt.wq_brain_client import is_configured
     from quantgpt.wq_pipeline import persist_wq_simulation, wq_simulate_metrics_sync
-
-    from sqlalchemy import select
 
     if not use_mock and not is_configured(account):
         err = {

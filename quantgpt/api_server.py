@@ -194,20 +194,20 @@ app.add_middleware(
 
 # Register route modules
 from .routes.admin import router as admin_router
+from .routes.admission import router as admission_router
+from .routes.audit import router as audit_router
 from .routes.auth import router as auth_router
 from .routes.backtest_tasks import router as backtest_tasks_router
 from .routes.comparison import router as comparison_router
 from .routes.composite import router as composite_router
 from .routes.daily_summary import router as daily_summary_router
-from .routes.admission import router as admission_router
-from .routes.audit import router as audit_router
 from .routes.expression_gate import router as expression_gate_router
-from .routes.factor_pipeline import router as factor_pipeline_router
 from .routes.factor_library import router as factor_library_router
+from .routes.factor_pipeline import router as factor_pipeline_router
 from .routes.feedback import router as feedback_router
 from .routes.iteration_routes import router as iteration_router
-from .routes.paper import router as paper_router
 from .routes.minimal_edits import router as minimal_edits_router
+from .routes.paper import router as paper_router
 from .routes.seed_factors import router as seed_factors_router
 from .routes.sessions import router as sessions_router
 from .routes.strategy_backtest import router as strategy_backtest_router

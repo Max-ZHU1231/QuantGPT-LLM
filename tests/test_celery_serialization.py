@@ -1,12 +1,12 @@
 """Tests for Celery JSON serialization helpers (to_json_transport / from_json_transport)."""
 
-import math
 import os
-import tempfile
 
 import numpy as np
 import pandas as pd
 import pytest
+
+pytest.importorskip("celery")
 
 from quantgpt.celery_app import CELERY_DATA_DIR, from_json_transport, to_json_transport
 

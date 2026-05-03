@@ -9,9 +9,9 @@ from __future__ import annotations
 import re
 
 from .expression_parser import (
-    ExpressionParser,
     _WQ_GROUP_PREFIXES,
     _WQ_NEWS_PREFIXES,
+    ExpressionParser,
     wq_allowlisted_plain_identifiers,
 )
 
