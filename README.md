@@ -283,6 +283,35 @@ results = batch_evaluate(
 
 ---
 
+## Factor Pipeline (WQ anchor intake)
+
+End-to-end **anchor factor → expression gate → BRAIN simulate → rule-based admission**, with optional human approval, audit queries, and trace-by-seed. Implements the template described in `quantgpt/factor_pipeline/FRAMEWORK.md`.
+
+### Capabilities
+
+| Area | What it does |
+|:-----|:-------------|
+| **Expression gate** | `validate_wq_full`: parser + optional whitelist + length/depth heuristics, failure categories, repair hints (`quantgpt/expression_gate.py`). REST: `POST /api/v1/expressions/validate_wq_full`. |
+| **Rule profiles** | Merge JSON thresholds with defaults (`rule_merge.py`), weighted composite score (`scoring.py`). REST CRUD: `/api/v1/factor_pipeline/rules/profiles`. |
+| **Anchor versioning** | `PATCH /api/v1/seed_factors/{id}` with revision snapshots (`SeedFactorRevision`). Optional `reference_backtest` on create/update. |
+| **Gated simulate** | `POST /api/v1/factor_pipeline/simulate/gated` — gate then persist `WQSimulationRun` via `PipelineRunJob`. |
+| **Admission** | `POST /api/v1/admission/decide` accepts optional `rule_profile_id`; stores `composite_score`, human workflow fields; `POST /api/v1/admission/decisions/{id}/human_review`. |
+| **Audit & trace** | `GET /api/v1/audit/trails`; `GET /api/v1/factor_pipeline/trace/{seed_factor_id}` aggregates revisions, batches, runs, decisions, audits; `GET /api/v1/factor_pipeline/metrics/summary` for lightweight counters. |
+| **MCP** | `evaluate_admission_rules` supports optional `oos_metrics_json` and `profile_rules_json` (same engine as REST). |
+| **Database** | Alembic revision **015** (`015_factor_pipeline_extensions.py`): `reference_backtest`, revisions, rule profiles, pipeline jobs, extended `admission_decisions`. |
+
+### Smoke script
+
+From repo root (loads `.env` like `python -m quantgpt`; **real BRAIN** by default):
+
+```bash
+python scripts/demo_anchor_pipeline_once.py
+```
+
+Use `--mock` for synthetic simulate without `WQ_BRAIN_EMAIL` / `WQ_BRAIN_PASSWORD`.
+
+---
+
 ## Key Engineering Decisions
 
 ### 1. Expression Parser — The Core Differentiator
@@ -462,6 +491,8 @@ quantgpt/
 │   ├── rolling_validator.py     # Walk-forward validation
 │   ├── wq_simulate.py           # WQ BRAIN dollar-neutral simulator
 │   ├── wq_brain_client.py       # WQ BRAIN API integration
+│   ├── factor_pipeline/        # Admission, rule merge, scoring, facade (WQ intake)
+│   ├── expression_gate.py       # WQ syntax gate (+ validate_wq_full)
 │   ├── neutralize.py            # Industry & cap neutralization
 │   ├── paper_engine.py          # Paper trading engine
 │   ├── daily_summary.py         # LLM-powered daily market report
@@ -469,7 +500,8 @@ quantgpt/
 ├── frontend/                    # React 18 + TypeScript + Tailwind CSS 4
 │   └── src/components/          # Monitoring dashboard
 ├── scripts/
-│   └── factor_miner.py          # Batch factor evaluation toolkit
+│   ├── factor_miner.py          # Batch factor evaluation toolkit
+│   └── demo_anchor_pipeline_once.py  # Anchor → gate → simulate → admission (CLI)
 ├── tests/                       # 74 tests (parser + backtest + WQ simulate)
 ├── example_factor/              # BRAIN validation screenshots
 └── docs/                        # Architecture, API, MCP, Mining guides

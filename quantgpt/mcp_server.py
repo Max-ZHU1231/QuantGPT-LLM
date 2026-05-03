@@ -177,15 +177,34 @@ async def wq_pipeline_simulate(
 
 
 @mcp.tool()
-def evaluate_admission_rules(is_metrics_json: str, simulation_ok: bool = True) -> str:
-    """M1-6：简化入库规则评估（与 REST POST /api/v1/admission/decide 规则引擎一致，但不写库）。"""
+def evaluate_admission_rules(
+    is_metrics_json: str,
+    simulation_ok: bool = True,
+    oos_metrics_json: str = "",
+    profile_rules_json: str = "",
+) -> str:
+    """M1-6：入库规则评估（可选 OOS 与规则画像 JSON；与 REST decide 引擎一致，不写库）。"""
     from .admission_rules import evaluate_admission_from_sim_metrics
 
     try:
-        metrics = json.loads(is_metrics_json) if is_metrics_json.strip() else {}
-        if not isinstance(metrics, dict):
-            return json.dumps({"error": "is_metrics_json must be a JSON object"}, ensure_ascii=False)
-        decision, reasons = evaluate_admission_from_sim_metrics(metrics, ok=simulation_ok)
+        metrics = json.loads(is_metrics_json) if is_metrics_json.strip() else None
+        if metrics is not None and not isinstance(metrics, dict):
+            return json.dumps({"error": "is_metrics_json must be a JSON object or empty"}, ensure_ascii=False)
+
+        oos = json.loads(oos_metrics_json) if oos_metrics_json.strip() else None
+        if oos is not None and not isinstance(oos, dict):
+            return json.dumps({"error": "oos_metrics_json must be a JSON object or empty"}, ensure_ascii=False)
+
+        prof = json.loads(profile_rules_json) if profile_rules_json.strip() else None
+        if prof is not None and not isinstance(prof, dict):
+            return json.dumps({"error": "profile_rules_json must be a JSON object or empty"}, ensure_ascii=False)
+
+        decision, reasons = evaluate_admission_from_sim_metrics(
+            metrics,
+            ok=simulation_ok,
+            oos_metrics=oos,
+            profile_rules_json=prof,
+        )
         return json.dumps({"status": "success", "decision": decision, "reasons": reasons}, ensure_ascii=False, indent=2)
     except json.JSONDecodeError as e:
         return json.dumps({"error": f"invalid JSON: {e}"}, ensure_ascii=False)

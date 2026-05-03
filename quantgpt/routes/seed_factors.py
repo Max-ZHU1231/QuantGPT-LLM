@@ -1,5 +1,7 @@
 """Seed factor routes — anchor-factor intake (M1-2)."""
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
@@ -26,6 +28,22 @@ class SeedFactorCreate(BaseModel):
     blacklist_operators: list[str] = Field(default_factory=list)
     blacklist_fields: list[str] = Field(default_factory=list)
     attachment_urls: list[str] = Field(default_factory=list)
+    reference_backtest: dict[str, Any] | list[Any] | None = None
+
+
+class SeedFactorPatch(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=255)
+    expression: str | None = Field(None, min_length=1)
+    econ_rationale: str | None = Field(None, min_length=50)
+    market: str | None = Field(None, min_length=1, max_length=50)
+    universe: str | None = Field(None, min_length=1, max_length=50)
+    frequency: str | None = Field(None, min_length=1, max_length=20)
+    factor_type: str | None = Field(None, max_length=100)
+    blacklist_operators: list[str] | None = None
+    blacklist_fields: list[str] | None = None
+    attachment_urls: list[str] | None = None
+    reference_backtest: dict[str, Any] | list[Any] | None = None
+    status: str | None = Field(None, max_length=32)
 
 
 def _to_detail(f: SeedFactor) -> dict:
@@ -41,6 +59,7 @@ def _to_detail(f: SeedFactor) -> dict:
         "blacklist_operators": f.blacklist_operators or [],
         "blacklist_fields": f.blacklist_fields or [],
         "attachment_urls": f.attachment_urls or [],
+        "reference_backtest": f.reference_backtest,
         "version": f.version,
         "created_by": f.created_by,
         "status": f.status,
@@ -83,6 +102,7 @@ async def create_seed_factor(
             blacklist_operators=payload.blacklist_operators,
             blacklist_fields=payload.blacklist_fields,
             attachment_urls=payload.attachment_urls,
+            reference_backtest=payload.reference_backtest,
         )
     except IntegrityError:
         await db.rollback()
@@ -97,6 +117,48 @@ async def create_seed_factor(
         payload={"name": factor.name},
     )
     return {"status": "success", "seed_factor_id": factor.id, "factor": _to_detail(factor)}
+
+
+@router.patch("/{seed_factor_id}")
+async def patch_seed_factor(
+    seed_factor_id: str,
+    payload: SeedFactorPatch,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    mgr = SeedFactorManager(db)
+    try:
+        factor = await mgr.update_owned_partial(
+            user_id=user.id,
+            seed_factor_id=seed_factor_id,
+            name=payload.name,
+            expression=payload.expression,
+            econ_rationale=payload.econ_rationale,
+            market=payload.market,
+            universe=payload.universe,
+            frequency=payload.frequency,
+            factor_type=payload.factor_type,
+            blacklist_operators=payload.blacklist_operators,
+            blacklist_fields=payload.blacklist_fields,
+            attachment_urls=payload.attachment_urls,
+            reference_backtest=payload.reference_backtest,
+            status=payload.status,
+        )
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="因子名称已存在") from None
+    if not factor:
+        raise HTTPException(status_code=404, detail="Seed factor not found")
+    await db.refresh(factor)
+    await write_audit_event(
+        db,
+        user_id=user.id,
+        event_type="update_seed",
+        entity_type="seed_factor",
+        entity_id=factor.id,
+        payload={"version": factor.version},
+    )
+    return {"status": "success", "factor": _to_detail(factor)}
 
 
 @router.get("/{seed_factor_id}")

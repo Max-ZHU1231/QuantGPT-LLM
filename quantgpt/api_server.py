@@ -200,7 +200,9 @@ from .routes.comparison import router as comparison_router
 from .routes.composite import router as composite_router
 from .routes.daily_summary import router as daily_summary_router
 from .routes.admission import router as admission_router
+from .routes.audit import router as audit_router
 from .routes.expression_gate import router as expression_gate_router
+from .routes.factor_pipeline import router as factor_pipeline_router
 from .routes.factor_library import router as factor_library_router
 from .routes.feedback import router as feedback_router
 from .routes.iteration_routes import router as iteration_router
@@ -222,6 +224,8 @@ app.include_router(minimal_edits_router)
 app.include_router(expression_gate_router)
 app.include_router(wq_simulations_router)
 app.include_router(admission_router)
+app.include_router(audit_router)
+app.include_router(factor_pipeline_router)
 app.include_router(composite_router)
 app.include_router(comparison_router)
 app.include_router(paper_router)

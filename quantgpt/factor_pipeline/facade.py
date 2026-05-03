@@ -45,6 +45,24 @@ class FactorResearchPipeline:
         return validate_wq(expression, strict_whitelist=strict_whitelist)
 
     @staticmethod
+    def step4_expression_gate_wq_full(
+        expression: str,
+        *,
+        strict_whitelist: bool = False,
+        max_expression_length: int | None = None,
+        max_paren_depth: int | None = None,
+    ) -> dict[str, Any]:
+        """§6.4 扩展门禁 → 失败分类 + 复杂度启发式 + 修复建议。"""
+        from quantgpt.expression_gate import validate_wq_full
+
+        return validate_wq_full(
+            expression,
+            strict_whitelist=strict_whitelist,
+            max_length=max_expression_length,
+            max_paren_depth=max_paren_depth,
+        )
+
+    @staticmethod
     def step5_wq_simulate_sync(
         expression: str,
         *,
@@ -109,11 +127,22 @@ class FactorResearchPipeline:
         )
 
     @staticmethod
-    def step6_evaluate_admission(is_metrics: dict | None, *, simulation_ok: bool):
+    def step6_evaluate_admission(
+        is_metrics: dict | None,
+        *,
+        simulation_ok: bool,
+        oos_metrics: dict[str, Any] | None = None,
+        profile_rules_json: dict[str, Any] | None = None,
+    ):
         """§6.6 → ``factor_pipeline.admission.evaluate_admission_from_sim_metrics``。"""
         from .admission import evaluate_admission_from_sim_metrics
 
-        return evaluate_admission_from_sim_metrics(is_metrics, ok=simulation_ok)
+        return evaluate_admission_from_sim_metrics(
+            is_metrics,
+            ok=simulation_ok,
+            oos_metrics=oos_metrics,
+            profile_rules_json=profile_rules_json,
+        )
 
     @staticmethod
     async def step7_audit(

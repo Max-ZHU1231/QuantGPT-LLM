@@ -30,6 +30,8 @@ class SeedFactor(Base):
     created_by = Column(String(100), nullable=False)
     attachment_urls = Column(JSON, nullable=True)
 
+    reference_backtest = Column(JSON, nullable=True)
+
     # 生命周期：使用字符串枚举值，避免错误的 Column(Enum(...)) 字面量写法
     status = Column(String(32), nullable=False, default="active")
 
@@ -149,7 +151,76 @@ class AdmissionDecision(Base):
     reasons = Column(JSON, nullable=True)
     rule_engine_version = Column(String(32), nullable=False, default="m1-6-v1")
 
+    composite_score = Column(Float, nullable=True)
+    human_approval_status = Column(String(32), nullable=False, default="not_required")
+    human_approval_comment = Column(Text, nullable=True)
+    human_approved_by = Column(String(100), nullable=True)
+    human_approved_at = Column(DateTime(timezone=True), nullable=True)
+    approval_chain = Column(JSON, nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class SeedFactorRevision(Base):
+    """锚因子修订快照（模板 §7.1 版本化）。"""
+
+    __tablename__ = "seed_factor_revisions"
+    __table_args__ = (Index("ix_seed_factor_revisions_seed_id", "seed_factor_id"),)
+
+    id = Column(String(64), primary_key=True)
+    seed_factor_id = Column(String(64), ForeignKey("seed_factors.id", ondelete="CASCADE"), nullable=False)
+    version_after = Column(Integer, nullable=False)
+    snapshot = Column(JSON, nullable=False)
+    edited_by = Column(String(100), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class PipelineRuleProfile(Base):
+    """可配置规则画像（正式 / 灰度）（模板 §7.2）。"""
+
+    __tablename__ = "pipeline_rule_profiles"
+    __table_args__ = (
+        UniqueConstraint("name", "created_by", name="uq_pipeline_rule_profiles_name_user"),
+        Index("ix_pipeline_rule_profiles_created_by", "created_by"),
+    )
+
+    id = Column(String(64), primary_key=True)
+    name = Column(String(128), nullable=False)
+    profile_kind = Column(String(32), nullable=False, default="formal")
+    market = Column(String(50), nullable=True)
+    universe = Column(String(50), nullable=True)
+    frequency = Column(String(20), nullable=True)
+    rules_json = Column(JSON, nullable=False, default=lambda: {})
+    created_by = Column(String(100), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
+class PipelineRunJob(Base):
+    """门禁 → simulate 编排任务（模板 §7.5）。"""
+
+    __tablename__ = "pipeline_run_jobs"
+    __table_args__ = (
+        Index("ix_pipeline_run_jobs_created_by", "created_by"),
+        Index("ix_pipeline_run_jobs_status", "status"),
+    )
+
+    id = Column(String(64), primary_key=True)
+    created_by = Column(String(100), nullable=False)
+    seed_factor_id = Column(String(64), ForeignKey("seed_factors.id", ondelete="SET NULL"), nullable=True)
+    edit_candidate_id = Column(String(64), ForeignKey("edit_candidates.id", ondelete="SET NULL"), nullable=True)
+    expression = Column(Text, nullable=False)
+
+    gate_passed = Column(Boolean, nullable=False, default=False)
+    gate_report = Column(JSON, nullable=True)
+    wq_simulation_run_id = Column(String(64), ForeignKey("wq_simulation_runs.id", ondelete="SET NULL"), nullable=True)
+
+    status = Column(String(32), nullable=False, default="queued")
+    error_message = Column(Text, nullable=True)
+    mock_used = Column(Boolean, nullable=False, default=False)
+
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class AuditTrail(Base):
