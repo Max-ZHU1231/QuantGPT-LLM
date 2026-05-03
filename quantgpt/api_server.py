@@ -199,6 +199,8 @@ from .routes.backtest_tasks import router as backtest_tasks_router
 from .routes.comparison import router as comparison_router
 from .routes.composite import router as composite_router
 from .routes.daily_summary import router as daily_summary_router
+from .routes.admission import router as admission_router
+from .routes.expression_gate import router as expression_gate_router
 from .routes.factor_library import router as factor_library_router
 from .routes.feedback import router as feedback_router
 from .routes.iteration_routes import router as iteration_router
@@ -209,6 +211,7 @@ from .routes.sessions import router as sessions_router
 from .routes.strategy_backtest import router as strategy_backtest_router
 from .routes.wq_brain import router as wq_brain_router
 from .routes.wq_brain_batch import router as wq_brain_batch_router
+from .routes.wq_simulations import router as wq_simulations_router
 
 app.include_router(auth_router)
 app.include_router(sessions_router)
@@ -216,6 +219,9 @@ app.include_router(admin_router)
 app.include_router(factor_library_router)
 app.include_router(seed_factors_router)
 app.include_router(minimal_edits_router)
+app.include_router(expression_gate_router)
+app.include_router(wq_simulations_router)
+app.include_router(admission_router)
 app.include_router(composite_router)
 app.include_router(comparison_router)
 app.include_router(paper_router)

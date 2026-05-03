@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..audit_log import write_audit_event
 from ..auth import get_current_user
 from ..db import get_db
 from ..managers.seed_factor_manager import SeedFactorManager
@@ -87,6 +88,14 @@ async def create_seed_factor(
         await db.rollback()
         raise HTTPException(status_code=409, detail="因子名称已存在") from None
     await db.refresh(factor)
+    await write_audit_event(
+        db,
+        user_id=user.id,
+        event_type="create_seed",
+        entity_type="seed_factor",
+        entity_id=factor.id,
+        payload={"name": factor.name},
+    )
     return {"status": "success", "seed_factor_id": factor.id, "factor": _to_detail(factor)}
 
 

@@ -22,6 +22,7 @@ import pandas as pd
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
+from .expression_gate import validate_wq_parse
 from .expression_parser import __doc__ as _expr_module_doc
 from .expression_parser import parse_expression
 from .fundamental_data import ALL_FUNDAMENTAL_NAMES
@@ -119,13 +120,71 @@ def validate_expression(expression: str, mode: str = "local") -> str:
         return f"ERROR: 括号不平衡：缺少 {depth} 个右括号 ')'"
 
     try:
-        func = parse_expression(expression, mode=mode)
         if mode == "wq":
-            return "OK: expression is valid for WQ BRAIN submission"
+            ok_wq, err_wq = validate_wq_parse(expression)
+            if ok_wq:
+                return "OK: expression is valid for WQ BRAIN submission"
+            return f"ERROR: {err_wq}"
+        func = parse_expression(expression, mode=mode)
         func(_VALIDATION_DUMMY)
         return "OK: expression is valid"
     except Exception as e:
         return f"ERROR: {e}"
+
+
+@mcp.tool()
+def validate_wq_gate(expression: str, strict_whitelist: bool = False) -> str:
+    """M1-4：WQ 门禁 — 与 REST POST /api/v1/expressions/validate_wq 对齐（parser + 可选标识符白名单）。"""
+    from .expression_gate import validate_wq
+
+    out = validate_wq(expression, strict_whitelist=strict_whitelist)
+    return json.dumps({"status": "success", "validation": out}, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+async def wq_pipeline_simulate(
+    expression: str,
+    region: str = "USA",
+    universe: str = "TOP3000",
+    delay: int = 1,
+    decay: int = 0,
+    neutralization: str = "SUBINDUSTRY",
+    truncation: float = 0.08,
+    account: str = "primary",
+) -> str:
+    """M1-5：WQBrainClient.simulate 仅拉指标（与 REST /api/v1/wq_simulations/run 同源逻辑，但不写数据库）。"""
+    from .wq_pipeline import wq_simulate_metrics_sync
+
+    try:
+        result = await asyncio.to_thread(
+            wq_simulate_metrics_sync,
+            expression,
+            region=region,
+            universe=universe,
+            delay=delay,
+            decay=decay,
+            neutralization=neutralization,
+            truncation=truncation,
+            account=account,
+        )
+        return json.dumps(result, ensure_ascii=False, indent=2, default=str)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def evaluate_admission_rules(is_metrics_json: str, simulation_ok: bool = True) -> str:
+    """M1-6：简化入库规则评估（与 REST POST /api/v1/admission/decide 规则引擎一致，但不写库）。"""
+    from .admission_rules import evaluate_admission_from_sim_metrics
+
+    try:
+        metrics = json.loads(is_metrics_json) if is_metrics_json.strip() else {}
+        if not isinstance(metrics, dict):
+            return json.dumps({"error": "is_metrics_json must be a JSON object"}, ensure_ascii=False)
+        decision, reasons = evaluate_admission_from_sim_metrics(metrics, ok=simulation_ok)
+        return json.dumps({"status": "success", "decision": decision, "reasons": reasons}, ensure_ascii=False, indent=2)
+    except json.JSONDecodeError as e:
+        return json.dumps({"error": f"invalid JSON: {e}"}, ensure_ascii=False)
 
 
 @mcp.tool()

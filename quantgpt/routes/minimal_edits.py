@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..audit_log import write_audit_event
 from ..auth import get_current_user
 from ..db import get_db
 from ..deepseek_client import factor_llm_config
@@ -84,6 +85,14 @@ async def generate_minimal_edits(
         if str(e) == "SEED_NOT_FOUND":
             raise HTTPException(status_code=404, detail="Seed factor not found") from None
         raise
+    await write_audit_event(
+        db,
+        user_id=user.id,
+        event_type="generate",
+        entity_type="generation_batch",
+        entity_id=batch.id,
+        payload={"seed_factor_id": batch.seed_factor_id, "generation_status": batch.generation_status},
+    )
     return {"status": "success", "batch": _batch_summary(batch)}
 
 

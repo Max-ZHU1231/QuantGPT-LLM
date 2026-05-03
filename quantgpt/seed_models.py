@@ -95,3 +95,78 @@ class EditCandidate(Base):
     deviation_explanation = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class WQSimulationRun(Base):
+    """WQ BRAIN simulate-only run (M1-5); metrics persisted (no formal submit in this path)."""
+
+    __tablename__ = "wq_simulation_runs"
+    __table_args__ = (
+        Index("ix_wq_simulation_runs_created_by", "created_by"),
+        Index("ix_wq_simulation_runs_edit_candidate_id", "edit_candidate_id"),
+    )
+
+    id = Column(String(64), primary_key=True)
+    created_by = Column(String(100), nullable=False)
+    edit_candidate_id = Column(String(64), ForeignKey("edit_candidates.id", ondelete="SET NULL"), nullable=True)
+    seed_factor_id = Column(String(64), ForeignKey("seed_factors.id", ondelete="SET NULL"), nullable=True)
+
+    expression = Column(Text, nullable=False)
+    region = Column(String(20), nullable=False, default="USA")
+    universe = Column(String(40), nullable=False, default="TOP3000")
+    delay = Column(Integer, nullable=False, default=1)
+    decay = Column(Integer, nullable=False, default=0)
+    neutralization = Column(String(40), nullable=False, default="SUBINDUSTRY")
+    truncation = Column(Float, nullable=False, default=0.08)
+    account = Column(String(20), nullable=False, default="primary")
+
+    ok = Column(Boolean, nullable=False, default=False)
+    error_message = Column(Text, nullable=True)
+    alpha_id = Column(String(128), nullable=True)
+    simulation_id = Column(String(128), nullable=True)
+    is_metrics = Column(JSON, nullable=True)
+    oos_metrics = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class AdmissionDecision(Base):
+    """Rule-engine admission outcome (M1-6)."""
+
+    __tablename__ = "admission_decisions"
+    __table_args__ = (
+        Index("ix_admission_decisions_created_by", "created_by"),
+        Index("ix_admission_decisions_wq_run", "wq_simulation_run_id"),
+    )
+
+    id = Column(String(64), primary_key=True)
+    created_by = Column(String(100), nullable=False)
+    edit_candidate_id = Column(String(64), ForeignKey("edit_candidates.id", ondelete="SET NULL"), nullable=True)
+    wq_simulation_run_id = Column(String(64), ForeignKey("wq_simulation_runs.id", ondelete="SET NULL"), nullable=True)
+    expression_snapshot = Column(Text, nullable=True)
+
+    decision = Column(String(32), nullable=False)
+    reasons = Column(JSON, nullable=True)
+    rule_engine_version = Column(String(32), nullable=False, default="m1-6-v1")
+
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class AuditTrail(Base):
+    """Append-only audit events (M1-6)."""
+
+    __tablename__ = "audit_trails"
+    __table_args__ = (
+        Index("ix_audit_trails_event_type", "event_type"),
+        Index("ix_audit_trails_entity", "entity_type", "entity_id"),
+        Index("ix_audit_trails_created_at", "created_at"),
+    )
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(100), nullable=True)
+    event_type = Column(String(64), nullable=False)
+    entity_type = Column(String(64), nullable=False)
+    entity_id = Column(String(128), nullable=False)
+    payload = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)

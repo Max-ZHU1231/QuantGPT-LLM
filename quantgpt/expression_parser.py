@@ -229,6 +229,13 @@ _WQ_REMOTE_ONLY_OPS = {
 
 _WQ_OPERATORS = _WQ_OPERATORS | set(_WQ_REMOTE_ONLY_OPS.keys())
 
+
+def wq_allowlisted_plain_identifiers() -> frozenset[str]:
+    """Lowercase bare identifiers aligned with WQ-mode parser (M1-4 tokenizer whitelist)."""
+    names = set(_WQ_OPERATORS) | set(_WQ_COLUMNS) | set(_WQ_SPECIAL_VARS) | set(_WQ_EXTENDED_FIELDS)
+    return frozenset(s.lower() for s in names)
+
+
 _WQ_REPLACEMENTS = {
     'tanh': 'sign_power(x, 0.5) 或 x / (1 + abs(x))',
     'sigmoid': 'rank(x) 或 1 / (1 + power(2.718, -x))',
