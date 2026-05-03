@@ -1,7 +1,7 @@
 """一次性跑通：随机锚因子 → WQ 门禁 → simulate → 入库评估（stdout JSON）。
 
 默认调用 **真实 WorldQuant BRAIN API**（需 ``WQ_BRAIN_EMAIL`` / ``WQ_BRAIN_PASSWORD``）。
-离线调试请加 ``--mock``。"""
+离线调试请加 ``--mock``；随机表达式锚定请加 ``--random-factor``（mock / 真实 simulate 均可）。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import json
 import os
 import random
 import sys
+import uuid
 from pathlib import Path
 
 # 项目根 .env（与 python -m quantgpt 一致）
@@ -28,7 +29,29 @@ if _env_file.is_file():
             os.environ.setdefault(key, val)
 
 
-async def main(*, use_mock: bool, account: str) -> None:
+_RANDOM_EXPR_TEMPLATES = (
+    "rank(close/ts_mean(close,{w}))",
+    "rank(-ts_corr(close, volume, {w}))",
+    "rank(ts_decay_linear(returns, {w}))",
+    "zscore(ts_rank(close, {w}))",
+    "rank(ts_delta(close, {w})/ts_std(close, {w}))",
+)
+_RANDOM_WINDOWS = (5, 10, 15, 20, 30, 40, 60)
+
+
+def _pick_random_valid_expression() -> str:
+    from quantgpt.expression_gate import validate_wq
+
+    for _ in range(24):
+        tpl = random.choice(_RANDOM_EXPR_TEMPLATES)
+        w = random.choice(_RANDOM_WINDOWS)
+        expr = tpl.format(w=w)
+        if validate_wq(expr).get("valid"):
+            return expr
+    return "rank(close/ts_mean(close,20))"
+
+
+async def main(*, use_mock: bool, account: str, random_factor: bool) -> None:
     os.chdir(_root)
 
     from sqlalchemy import select
@@ -65,7 +88,24 @@ async def main(*, use_mock: bool, account: str) -> None:
         rows = list(res.scalars().all())
         mgr = SeedFactorManager(db)
 
-        if not rows:
+        if random_factor:
+            suffix = random.randint(1000, 9999)
+            expr_new = _pick_random_valid_expression()
+            picked = await mgr.create(
+                user_id=_DEV_USER_ID,
+                name=f"demo_rand_{suffix}_{uuid.uuid4().hex[:6]}",
+                expression=expr_new,
+                econ_rationale=(
+                    "Random-demo anchor for mock pipeline smoke: momentum / vol / corr variants; "
+                    "padding narrative for minimum rationale length compliance."
+                ),
+                market="USA",
+                universe="TOP3000",
+                frequency="daily",
+            )
+            await db.commit()
+            created_note = "created_random_demo_anchor"
+        elif not rows:
             suffix = random.randint(1000, 9999)
             picked = await mgr.create(
                 user_id=_DEV_USER_ID,
@@ -167,6 +207,11 @@ if __name__ == "__main__":
         default="primary",
         help="BRAIN 凭证账号槽（primary / alt）",
     )
+    parser.add_argument(
+        "--random-factor",
+        action="store_true",
+        help="忽略已有种子，新建随机表达式锚因子（模板 + 随机窗口，门禁校验通过后再跑）",
+    )
     args = parser.parse_args()
-    asyncio.run(main(use_mock=args.mock, account=args.account))
+    asyncio.run(main(use_mock=args.mock, account=args.account, random_factor=args.random_factor))
     sys.exit(0)

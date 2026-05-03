@@ -206,7 +206,7 @@ from .routes.factor_library import router as factor_library_router
 from .routes.factor_pipeline import router as factor_pipeline_router
 from .routes.feedback import router as feedback_router
 from .routes.iteration_routes import router as iteration_router
-from .routes.minimal_edits import router as minimal_edits_router
+from .factor_pipeline.minimal_edits_routes import router as minimal_edits_router
 from .routes.paper import router as paper_router
 from .routes.seed_factors import router as seed_factors_router
 from .routes.sessions import router as sessions_router

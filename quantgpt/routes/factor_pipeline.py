@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -16,7 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..audit_log import write_audit_event
 from ..auth import get_current_user
 from ..db import get_db
-from ..expression_gate import validate_wq_full
+from ..factor_pipeline.feature_flags import pipeline_one_click_enabled
+from ..factor_pipeline.gated_run import run_gated_wq_pipeline
+from ..factor_pipeline.orchestration import run_gate_simulate_decide
+from ..factor_pipeline.pipeline_dto import wq_run_summary_dict
 from ..managers.pipeline_rule_profile_manager import PipelineRuleProfileManager
 from ..managers.seed_factor_manager import SeedFactorManager
 from ..models import User
@@ -29,37 +31,8 @@ from ..seed_models import (
     SeedFactorRevision,
     WQSimulationRun,
 )
-from ..wq_pipeline import (
-    persist_wq_simulation,
-    verify_edit_candidate_owned,
-    wq_mock_simulate_enabled,
-    wq_simulate_metrics_sync,
-)
 
 router = APIRouter(prefix="/api/v1/factor_pipeline", tags=["factor_pipeline"])
-
-
-def _new_job_id() -> str:
-    day = datetime.now(timezone.utc).strftime("%Y%m%d")
-    return f"prun_{day}_{uuid.uuid4().hex[:8]}"
-
-
-def _wq_run_summary(row: WQSimulationRun) -> dict:
-    return {
-        "id": row.id,
-        "expression": row.expression,
-        "ok": row.ok,
-        "error_message": row.error_message,
-        "alpha_id": row.alpha_id,
-        "simulation_id": row.simulation_id,
-        "region": row.region,
-        "universe": row.universe,
-        "edit_candidate_id": row.edit_candidate_id,
-        "seed_factor_id": row.seed_factor_id,
-        "is_metrics": row.is_metrics,
-        "oos_metrics": row.oos_metrics,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-    }
 
 
 def _profile_dict(p: PipelineRuleProfile) -> dict[str, Any]:
@@ -74,23 +47,6 @@ def _profile_dict(p: PipelineRuleProfile) -> dict[str, Any]:
         "created_by": p.created_by,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
-    }
-
-
-def _job_dict(j: PipelineRunJob) -> dict[str, Any]:
-    return {
-        "id": j.id,
-        "status": j.status,
-        "expression": j.expression,
-        "gate_passed": j.gate_passed,
-        "gate_report": j.gate_report,
-        "wq_simulation_run_id": j.wq_simulation_run_id,
-        "seed_factor_id": j.seed_factor_id,
-        "edit_candidate_id": j.edit_candidate_id,
-        "error_message": j.error_message,
-        "mock_used": j.mock_used,
-        "created_at": j.created_at.isoformat() if j.created_at else None,
-        "completed_at": j.completed_at.isoformat() if j.completed_at else None,
     }
 
 
@@ -111,144 +67,95 @@ class GatedSimulateRequest(BaseModel):
     max_paren_depth: int | None = None
 
 
+class CompletePipelineRequest(GatedSimulateRequest):
+    rule_profile_id: str | None = None
+
+
 @router.post("/simulate/gated", status_code=201)
 async def gated_simulate(
     payload: GatedSimulateRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if payload.seed_factor_id:
-        sm = SeedFactorManager(db)
-        sf = await sm.get_owned(user_id=user.id, seed_factor_id=payload.seed_factor_id)
-        if not sf:
-            raise HTTPException(status_code=404, detail="Seed factor not found")
-    if payload.edit_candidate_id:
-        cand = await verify_edit_candidate_owned(
-            db, user_id=user.id, candidate_id=payload.edit_candidate_id
-        )
-        if not cand:
-            raise HTTPException(status_code=404, detail="Edit candidate not found")
-
-    now = datetime.now(timezone.utc)
-    job = PipelineRunJob(
-        id=_new_job_id(),
-        created_by=str(user.id),
+    result = await run_gated_wq_pipeline(
+        db,
+        user_id=user.id,
+        expression=payload.expression,
         seed_factor_id=payload.seed_factor_id,
         edit_candidate_id=payload.edit_candidate_id,
-        expression=payload.expression.strip(),
-        gate_passed=False,
-        gate_report=None,
-        wq_simulation_run_id=None,
-        status="queued",
-        error_message=None,
-        mock_used=False,
-        created_at=now,
-        completed_at=None,
-    )
-    db.add(job)
-    await db.flush()
-
-    gate = validate_wq_full(
-        payload.expression,
         strict_whitelist=payload.strict_whitelist,
-        max_length=payload.max_expression_length,
+        max_expression_length=payload.max_expression_length,
         max_paren_depth=payload.max_paren_depth,
+        region=payload.region,
+        universe=payload.universe,
+        delay=payload.delay,
+        decay=payload.decay,
+        neutralization=payload.neutralization,
+        truncation=payload.truncation,
+        account=payload.account,
+        mock=payload.mock,
     )
+    if result.get("error") == "seed_factor_not_found":
+        raise HTTPException(status_code=404, detail="Seed factor not found")
+    if result.get("error") == "edit_candidate_not_found":
+        raise HTTPException(status_code=404, detail="Edit candidate not found")
 
-    if not gate.get("valid"):
-        job.status = "failed"
-        job.gate_passed = False
-        job.gate_report = gate
-        job.error_message = "expression_gate_failed"
-        job.completed_at = datetime.now(timezone.utc)
-        await db.flush()
-        await write_audit_event(
-            db,
-            user_id=user.id,
-            event_type="pipeline_gated_simulate",
-            entity_type="pipeline_run_job",
-            entity_id=job.id,
-            payload={"phase": "gate", "passed": False},
-        )
-        return {"status": "success", "job": _job_dict(job), "gate": gate, "simulation": None}
+    job = result["job"]
+    gate = result["gate"]
 
-    job.gate_passed = True
-    job.gate_report = gate
-    job.status = "running"
-    await db.flush()
-
-    use_mock = payload.mock or wq_mock_simulate_enabled()
-    job.mock_used = use_mock
-    await db.flush()
-
-    try:
-        sim = await asyncio.to_thread(
-            lambda: wq_simulate_metrics_sync(
-                payload.expression,
-                region=payload.region,
-                universe=payload.universe,
-                delay=payload.delay,
-                decay=payload.decay,
-                neutralization=payload.neutralization,
-                truncation=payload.truncation,
-                account=payload.account,
-                mock=use_mock,
-            ),
-        )
-        row = await persist_wq_simulation(
-            db,
-            user_id=user.id,
-            expression=payload.expression,
-            sim=sim,
-            edit_candidate_id=payload.edit_candidate_id,
-            seed_factor_id=payload.seed_factor_id,
-            region=payload.region,
-            universe=payload.universe,
-            delay=payload.delay,
-            decay=payload.decay,
-            neutralization=payload.neutralization,
-            truncation=payload.truncation,
-            account=payload.account,
-        )
-        job.wq_simulation_run_id = row.id
-        job.status = "completed"
-        job.completed_at = datetime.now(timezone.utc)
-        await db.flush()
-        await write_audit_event(
-            db,
-            user_id=user.id,
-            event_type="pipeline_gated_simulate",
-            entity_type="pipeline_run_job",
-            entity_id=job.id,
-            payload={"phase": "simulate", "wq_simulation_run_id": row.id, "mock": use_mock},
-        )
-        return {
-            "status": "success",
-            "job": _job_dict(job),
-            "gate": gate,
-            "simulation": _wq_run_summary(row),
-            "raw": sim,
-        }
-    except Exception as e:
-        job.status = "failed"
-        job.error_message = str(e)[:4000]
-        job.completed_at = datetime.now(timezone.utc)
-        await db.flush()
-        await write_audit_event(
-            db,
-            user_id=user.id,
-            event_type="pipeline_gated_simulate",
-            entity_type="pipeline_run_job",
-            entity_id=job.id,
-            payload={"phase": "simulate", "error": job.error_message},
-        )
+    if result.get("status") == "simulate_failed":
         return {
             "status": "simulate_failed",
-            "job": _job_dict(job),
+            "job": job,
             "gate": gate,
             "simulation": None,
-            "error": job.error_message,
+            "error": result.get("error"),
         }
+    if not gate.get("valid"):
+        return {"status": "success", "job": job, "gate": gate, "simulation": None}
+    return {
+        "status": "success",
+        "job": job,
+        "gate": gate,
+        "simulation": result.get("simulation"),
+        "raw": result.get("raw_simulation"),
+    }
+
+
+@router.post("/run/complete")
+async def run_complete_pipeline(
+    payload: CompletePipelineRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """路线图 P0 — gate → simulate → decide（需 ``FACTOR_PIPELINE_ONE_CLICK``）。"""
+    if not pipeline_one_click_enabled():
+        raise HTTPException(status_code=403, detail="FACTOR_PIPELINE_ONE_CLICK disabled")
+
+    out = await run_gate_simulate_decide(
+        db,
+        user_id=user.id,
+        expression=payload.expression,
+        seed_factor_id=payload.seed_factor_id,
+        edit_candidate_id=payload.edit_candidate_id,
+        rule_profile_id=payload.rule_profile_id,
+        strict_whitelist=payload.strict_whitelist,
+        max_expression_length=payload.max_expression_length,
+        max_paren_depth=payload.max_paren_depth,
+        region=payload.region,
+        universe=payload.universe,
+        delay=payload.delay,
+        decay=payload.decay,
+        neutralization=payload.neutralization,
+        truncation=payload.truncation,
+        account=payload.account,
+        mock=payload.mock,
+    )
+    if out["flow_status"] == "client_error":
+        raise HTTPException(status_code=out["http_status"], detail=out.get("detail", "bad_request"))
+
+    body = {k: v for k, v in out.items() if k not in ("flow_status", "http_status")}
+    return JSONResponse(status_code=out["http_status"], content=body)
 
 
 @router.get("/trace/{seed_factor_id}")
@@ -364,7 +271,7 @@ async def trace_seed_factor(
         "seed_factor_id": seed_factor_id,
         "revisions": [rev_dict(r) for r in revisions],
         "generation_batches": [batch_summary(b) for b in batches],
-        "wq_simulation_runs": [_wq_run_summary(r) for r in runs],
+        "wq_simulation_runs": [wq_run_summary_dict(r) for r in runs],
         "admission_decisions": [decision_summary(d) for d in decisions],
         "audit_trails": [
             {

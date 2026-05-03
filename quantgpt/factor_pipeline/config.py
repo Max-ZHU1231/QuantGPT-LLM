@@ -19,7 +19,7 @@ DEFAULT_ADMISSION_THRESHOLDS = AdmissionHardThresholds()
 
 @dataclass(frozen=True)
 class LLMMinimalEditDefaults:
-    """LLM 最小改动生成默认 — 与 minimal_edit_generator / GenerationBatch 字段对齐。"""
+    """LLM 最小改动生成默认 — 与 ``factor_pipeline.minimal_edit_generator`` / ``GenerationBatch`` 字段对齐。"""
 
     prompt_version: str = "m1-3-v1"
     temperature: float = 0.3

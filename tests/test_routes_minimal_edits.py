@@ -56,7 +56,7 @@ def deepseek_key(monkeypatch):
 
 @pytest.fixture
 def mock_deepseek_chat(monkeypatch):
-    import quantgpt.minimal_edit_generator as mig
+    import quantgpt.factor_pipeline.minimal_edit_generator as mig
 
     monkeypatch.setattr(mig, "_deepseek_chat", lambda _messages: _fake_llm_ok())
 
@@ -147,7 +147,7 @@ class TestMinimalEditsGenerate:
         deepseek_key,
         monkeypatch,
     ):
-        import quantgpt.minimal_edit_generator as mig
+        import quantgpt.factor_pipeline.minimal_edit_generator as mig
 
         monkeypatch.setattr(mig, "_deepseek_chat", lambda _messages: "not json")
 
@@ -176,7 +176,7 @@ class TestMinimalEditsIsolation:
         from httpx import ASGITransport, AsyncClient
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-        import quantgpt.minimal_edit_generator as mig
+        import quantgpt.factor_pipeline.minimal_edit_generator as mig
         from quantgpt.api_server import app
         from quantgpt.db import get_db
 

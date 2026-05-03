@@ -1,4 +1,4 @@
-"""Minimal-edit generation routes (M1-3)."""
+"""Minimal-edit generation REST (M1-3) — factor pipeline."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -8,8 +8,8 @@ from ..audit_log import write_audit_event
 from ..auth import get_current_user
 from ..db import get_db
 from ..deepseek_client import factor_llm_config
-from ..minimal_edit_generator import generate_minimal_edits_for_seed, get_batch_for_user
 from ..models import User
+from .minimal_edit_generator import generate_minimal_edits_for_seed, get_batch_for_user
 
 router = APIRouter(prefix="/api/v1/minimal_edits", tags=["minimal_edits"])
 

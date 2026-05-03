@@ -121,9 +121,15 @@ def validate_wq_full(
     strict_whitelist: bool = False,
     max_length: int | None = None,
     max_paren_depth: int | None = None,
+    semantic_mvp: bool | None = None,
 ) -> dict:
     """门禁详情：分类失败原因 + 复杂度 + 修复建议占位。"""
     from .expression_parser import ExpressionParser
+
+    if semantic_mvp is None:
+        from quantgpt.factor_pipeline.feature_flags import pipeline_semantic_mvp_enabled
+
+        semantic_mvp = pipeline_semantic_mvp_enabled()
 
     max_len = max_length if max_length is not None else ExpressionParser.MAX_EXPRESSION_LENGTH
     max_paren = max_paren_depth if max_paren_depth is not None else ExpressionParser.MAX_DEPTH
@@ -164,4 +170,10 @@ def validate_wq_full(
             seen.add(c)
             fc.append(c)
     out["failure_categories"] = fc
+
+    if semantic_mvp:
+        from quantgpt.factor_pipeline.semantic_mvp import semantic_economic_heuristics
+
+        out["semantic_mvp"] = semantic_economic_heuristics(expr)
+
     return out

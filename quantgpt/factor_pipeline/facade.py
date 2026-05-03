@@ -14,6 +14,52 @@ class FactorResearchPipeline:
     各 Step 调用既有模块；未实现部分在 ``status.IMPLEMENTATION_MATRIX`` 标注为 planned/partial。
     """
 
+    @staticmethod
+    async def run_gate_simulate_decide(
+        db: AsyncSession,
+        *,
+        user_id: UUID,
+        expression: str,
+        seed_factor_id: str | None = None,
+        edit_candidate_id: str | None = None,
+        rule_profile_id: str | None = None,
+        strict_whitelist: bool = False,
+        max_expression_length: int | None = None,
+        max_paren_depth: int | None = None,
+        region: str = "USA",
+        universe: str = "TOP3000",
+        delay: int = 1,
+        decay: int = 0,
+        neutralization: str = "SUBINDUSTRY",
+        truncation: float = 0.08,
+        account: str = "primary",
+        mock: bool = False,
+        write_validation_audit: bool = True,
+    ) -> dict[str, Any]:
+        """路线图 P0 — 一键 gate → simulate → decide（与 ``POST .../factor_pipeline/run/complete`` 对齐）。"""
+        from .orchestration import run_gate_simulate_decide as _run
+
+        return await _run(
+            db,
+            user_id=user_id,
+            expression=expression,
+            seed_factor_id=seed_factor_id,
+            edit_candidate_id=edit_candidate_id,
+            rule_profile_id=rule_profile_id,
+            strict_whitelist=strict_whitelist,
+            max_expression_length=max_expression_length,
+            max_paren_depth=max_paren_depth,
+            region=region,
+            universe=universe,
+            delay=delay,
+            decay=decay,
+            neutralization=neutralization,
+            truncation=truncation,
+            account=account,
+            mock=mock,
+            write_validation_audit=write_validation_audit,
+        )
+
     # --- Step 1 锚因子（REST / SeedFactorManager）---
     # 建议使用 routes.seed_factors；此处仅文档化。
 
@@ -26,8 +72,8 @@ class FactorResearchPipeline:
         target_gap: dict[str, Any],
         knowledge_base: dict[str, Any] | None = None,
     ):
-        """§6.3 → ``minimal_edit_generator.generate_minimal_edits_for_seed``."""
-        from quantgpt.minimal_edit_generator import generate_minimal_edits_for_seed
+        """§6.3 → ``factor_pipeline.minimal_edit_generator.generate_minimal_edits_for_seed``."""
+        from .minimal_edit_generator import generate_minimal_edits_for_seed
 
         return await generate_minimal_edits_for_seed(
             db,

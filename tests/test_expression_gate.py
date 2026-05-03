@@ -1,6 +1,6 @@
 """Unit tests for M1-4 expression gate."""
 
-from quantgpt.expression_gate import validate_wq, whitelist_violations
+from quantgpt.expression_gate import validate_wq, validate_wq_full, whitelist_violations
 
 
 def test_wq_parse_rank_mean_ok():
@@ -25,3 +25,11 @@ def test_strict_whitelist_flags_unknown_identifier():
 def test_whitelist_violations_helpers():
     bad = whitelist_violations("rank(close)+foo_bar_unknown")
     assert "foo_bar_unknown" in bad
+
+
+def test_validate_wq_full_semantic_mvp_optional():
+    r = validate_wq_full("rank(close)", semantic_mvp=True)
+    assert r["valid"] is True
+    sem = r.get("semantic_mvp") or {}
+    assert sem.get("economic_semantic_mvp") is True
+    assert "warnings" in sem

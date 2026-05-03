@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-PIPELINE_VERSION = "1.0.0-mvp"
+PIPELINE_VERSION = "1.3.0-mvp"
 
 from .config import (
     DEFAULT_ADMISSION_THRESHOLDS,
@@ -31,6 +31,8 @@ __all__ = [
     "IMPLEMENTATION_MATRIX",
     "summarize_completion",
     "FactorResearchPipeline",
+    "generate_minimal_edits_for_seed",
+    "get_batch_for_user",
 ]
 
 
@@ -39,4 +41,12 @@ def __getattr__(name: str):
         from .facade import FactorResearchPipeline
 
         return FactorResearchPipeline
+    if name == "generate_minimal_edits_for_seed":
+        from .minimal_edit_generator import generate_minimal_edits_for_seed
+
+        return generate_minimal_edits_for_seed
+    if name == "get_batch_for_user":
+        from .minimal_edit_generator import get_batch_for_user
+
+        return get_batch_for_user
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
